@@ -2,33 +2,46 @@
 #define _WATERIUS_POWER_h
 
 #include <Arduino.h>
+#include "SlaveI2C.h"
 
 //Выключение ADC сохраняет ~230uAF. 
 #define adc_disable() (ADCSRA &= ~(1<<ADEN)) // disable ADC
 #define adc_enable()  (ADCSRA |=  (1<<ADEN)) // re-enable ADC
 
-uint16_t readVcc();
+
+#define BUTTON_FILTER 1
+#define BUTTON_LONG_PRESS	20
+#define BUTTON_SHORT_PRESS	1
+#define BUTTON_SHUTDOWN		8
 
 /*
-    Включение питания ESP подачей HIGH на ESP_POWER_PIN пин.
-    Класс нужен для измерения времени подачи питания.
-    Из-за нехватки pin на Attiny85 мы сажаем кнопку на линию i2c.
+    Клас управления питанием ESP с инициализацией I2C 
+    В методе tick() подсчитывается время работы по истечению которого 
+    включается режим передачи данных. По длительному нажатию кнопки 
+    включается редим настройки. Также реализовано ограничение 
+    длительности работы ESP.
 */
-struct ESPPowerPin 
-{
-    explicit ESPPowerPin(const uint8_t);
+class ESPPowerPin {
+    protected:
+        static uint8_t btn_r;
+        static uint8_t btn_f;
+        static uint16_t countMinute;
+	    static uint8_t wdt_count;
 
-    //Пин подачи питания на ESP
-    uint8_t power_pin;                 
-
-    //Время включения Wi-Fi 
-    unsigned long wake_up_timestamp; 
-
-    //Подать или снять питание с ESP
-    void power(const bool);      
-
-    //Прошло ли больше msec времени с момента wake_up_timestamp
-    bool elapsed(const unsigned long msec);
+    public:
+    explicit ESPPowerPin();
+    // Подать питание с ESP, и включить i2c
+    static void on();
+    // Отключить питание с ESP, и включить i2c
+    static void off();      
+    // Установить нормальный режим работы (только подсчет импульсов)
+    static void setModeNormal();
+    // Установить режим работы "Настройка"
+    static void setModeSetup();
+    // Установить режим работы "Передача данных"
+    static void setModeTransmit();
+    // Функция подсчета времени
+    static void tick();
 };
 
 #endif

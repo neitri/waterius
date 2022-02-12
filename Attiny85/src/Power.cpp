@@ -2,72 +2,143 @@
 #include "Power.h"
 #include <Arduino.h>
 #include <avr/sleep.h>
-#include <avr/power.h>    
+#include <avr/power.h>
 #include <avr/wdt.h>
 #include "Setup.h"
+#include "SlaveI2C.h"
+#include "Sensor.h"
 
+extern struct NewHeader head;
 
-ESPPowerPin::ESPPowerPin(const uint8_t p)
-    : power_pin(p)
-    , wake_up_timestamp(0)
+/* Счетчик минут до передачи данных*/
+uint16_t ESPPowerPin::countMinute = WAKEUP_PERIOD_DEFAULT;
+/* Счетчик отсчета минутного интервала*/
+uint8_t ESPPowerPin::wdt_count = 240;
+/* таймер нажатого состояния кнопки*/
+uint8_t ESPPowerPin::btn_r = 0;
+/* таймер отпущенного состояния кнопки */
+uint8_t ESPPowerPin::btn_f = 0;
+
+ESPPowerPin::ESPPowerPin()
 {
-    pinMode(power_pin, INPUT);
+    setModeNormal();
+};
+
+void ESPPowerPin::setModeNormal()
+{
+    head.mode = NORMAL_MODE;
+    countMinute = head.wakeupPeriod;
+    wdt_count = 0;
+    off();
 }
 
-void ESPPowerPin::power(const bool on)
+void ESPPowerPin::setModeSetup()
 {
-    if (on)
-    {
-        pinMode(power_pin, OUTPUT);
-        
-        digitalWrite(power_pin, HIGH);
-        wake_up_timestamp = millis();
+    head.mode = SETUP_MODE;
+    countMinute = 10;
+    wdt_count = 0;
+    on();
+}
+
+void ESPPowerPin::setModeTransmit()
+{
+    head.mode = TRANSMIT_MODE;
+    countMinute = 0;
+    wdt_count = 60;
+    on();
+}
+
+void ESPPowerPin::tick()
+{
+    if (wdt_count == 0)
+    { // выполнение каждую минуту
+        wdt_count = 240;
+        if (countMinute == 0)
+        {
+            if (head.mode == NORMAL_MODE)
+            {
+                setModeTransmit();
+            }
+            else
+            {
+                setModeNormal();
+            }
+        }
+        else
+        {
+            countMinute--;
+        }
     }
     else
     {
-        digitalWrite(power_pin, LOW);
+        wdt_count--;
+    }
 
-        pinMode(power_pin, INPUT);  // снижаем потребление
-        wake_up_timestamp = 0;
+    // On key pressed
+    if (!(PINB & _BV(PB2)))
+    {
+        btn_r++;
+        if (btn_r > BUTTON_FILTER)
+        {
+            btn_f = 0;
+        }
+    }
+    else if (btn_r)
+    {
+        btn_f++;
+        if (btn_f > BUTTON_FILTER)
+        {
+            if (head.mode == NORMAL_MODE)
+            {
+                if (btn_r > BUTTON_LONG_PRESS)
+                {
+                    setModeSetup();
+                }
+                else if (btn_r > BUTTON_SHORT_PRESS)
+                {
+                    setModeTransmit();
+                }
+            }
+            else
+            {
+                if (btn_r > BUTTON_SHUTDOWN)
+                {
+                    setModeNormal();
+                    // btn_f=0;
+                }
+            }
+            btn_r = 0;
+        }
     }
 }
 
-bool ESPPowerPin::elapsed(const unsigned long msec)
+void ESPPowerPin::on()
 {
-    return millis() - wake_up_timestamp > msec;
+    power_all_enable();
+    set_sleep_mode(SLEEP_MODE_IDLE);
+    SlaveI2C::begin();
+    asm volatile("sbi %0, %1 "
+                 :
+                 : "I"(_SFR_IO_ADDR(DDRB)), "I"(PB1)
+                 :);
+    asm volatile("sbi %0, %1 "
+                 :
+                 : "I"(_SFR_IO_ADDR(PORTB)), "I"(PB1)
+                 :);
 }
 
-
-// Меряем напряжение питания Attiny85. 
-// Есть погрешность, поэтому надо калбировать. Для каждой attiny будет своя константа 1126400L.
-// https://provideyourown.com/2012/secret-arduino-voltmeter-measure-battery-voltage/
-uint16_t readVcc() 
+void ESPPowerPin::off()
 {
-    // Read 1.1V reference against AVcc
-    // set the reference to Vcc and the measurement to the internal 1.1V reference
+    asm volatile("cbi %0, %1 "
+                 :
+                 : "I"(_SFR_IO_ADDR(PORTB)), "I"(PB1)
+                 :);
 
-    //Включаем ADC 
-    power_adc_enable();
-    adc_enable();
-
-    ADMUX = _BV(MUX3) | _BV(MUX2);   // attiny85
-    
-    //delayMicroseconds(5);    // only needed if using sensors with source resistance > 10K
-    delay(2); // Wait for Vref to settle. See Table 17-4. Input Channel Selections
-    ADCSRA |= _BV(ADSC); // Start conversion
-    while (bit_is_set(ADCSRA,ADSC)); // measuring
-
-    uint8_t low  = ADCL; // must read ADCL first - it then locks ADCH 
-    uint8_t high = ADCH; // unlocks both
-
-    uint16_t result = (high<<8) | low;
-
-    //result = 1126400L / result; // calculate Vcc (in mV); 1126400 = 1.1*1024*1000 // generally
-    result = 1126400L / result; // calculate Vcc (in mV); 1168538 = 1.14115*1024*1000 // for this ATtiny
-
-    //Выключаем ADC
-    adc_disable();
-    power_adc_disable();
-
-    return result; //милиВольт
+    asm volatile("cbi %0, %1 "
+                 :
+                 : "I"(_SFR_IO_ADDR(DDRB)), "I"(PB1)
+                 :);
+    SlaveI2C::end();
+    set_sleep_mode(SLEEP_MODE_PWR_DOWN);
+    power_all_disable();
 }

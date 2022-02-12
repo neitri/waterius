@@ -125,18 +125,18 @@ bool MasterI2C::    getSlaveData(SlaveData &data) {
     uint8_t dummy, crc = 0;
     bool good = getByte(data.version, crc);
     good &= getByte(data.service, crc);
-    good &= getUint(data.voltage, crc);
+    //good &= getUint(data.voltage, crc);
 
     good &= getByte(data.resets, crc);
     good &= getByte(data.model, crc);
-    good &= getByte(data.state0, crc);
-    good &= getByte(data.state1, crc);
-
+    
     good &= getUint(data.impulses0, crc);
-    good &= getUint(data.impulses1, crc);
+    good &= getByte(data.state0, crc);
+    good &= getByte(data.adc0, crc);
 
-    good &= getUint16(data.adc0, crc);
-    good &= getUint16(data.adc1, crc);
+    good &= getUint(data.impulses1, crc);
+    good &= getByte(data.state1, crc);
+    good &= getByte(data.adc1, crc);
 
     good &= getByte(data.crc, dummy);
 
@@ -159,6 +159,8 @@ bool MasterI2C::    getSlaveData(SlaveData &data) {
             LOG_INFO(FPSTR(S_I2C), F("impulses1: ") << data.impulses1);
             LOG_INFO(FPSTR(S_I2C), F("adc0: ") << data.adc0);
             LOG_INFO(FPSTR(S_I2C), F("adc1: ") << data.adc1);
+            LOG_INFO(FPSTR(S_I2C), F("crc: ") << data.crc);
+            LOG_INFO(FPSTR(S_I2C), F("crc calc: ") << crc);
             LOG_INFO(FPSTR(S_I2C), F("CRC ok"));
         break;
         case WATERIUS_NO_LINK:
@@ -173,8 +175,8 @@ bool MasterI2C::setWakeUpPeriod(uint16_t period)
     uint8_t txBuf[4];
     
     txBuf[0] = 'S';
-    txBuf[1] = (uint8_t)(period>>8);
-    txBuf[2] = (uint8_t)(period);
+    txBuf[1] = (uint8_t)(period);
+    txBuf[2] = (uint8_t)(period>>8);
     txBuf[3] = crc_8(&txBuf[1],2,0);
     
     if(!sendData(txBuf,4)) {

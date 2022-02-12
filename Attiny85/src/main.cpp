@@ -1,15 +1,17 @@
+
 #include "Setup.h"
-
-#include <avr/pgmspace.h>
-#include <Wire.h>
-
+#include "Sensor.h"
 #include "Power.h"
 #include "SlaveI2C.h"
-#include "Storage.h"
-#include "counter.h"
-#include <avr/wdt.h>
-#include <avr/sleep.h>
+
+#include <Wire.h>
+
+#include <avr/eeprom.h>
+#include <avr/io.h>
+#include <avr/pgmspace.h>
 #include <avr/power.h>  
+#include <avr/sleep.h>
+#include <avr/wdt.h>
 
 // Для логирования раскомментируйте LOG_ON в Setup.h
 #if defined(LOG_ON)
@@ -17,7 +19,7 @@
 #endif
 
 
-#define FIRMWARE_VER 22    // Передается в ESP и на сервер в данных.
+#define FIRMWARE_VER 23    // Передается в ESP и на сервер в данных.
   
 /*
 Версии прошивок 
@@ -100,168 +102,92 @@
 //
 // https://github.com/SpenceKonde/ATTinyCore/blob/master/avr/extras/ATtiny_x5.md
 
-static CounterB counter0(4, 2);  // Вход 1, Blynk: V0, горячая вода PB4 ADC2
-static CounterB counter1(3, 3);  // Вход 2, Blynk: V1, холодная вода (или лог) PB3 ADC3
+// Данные Wateriusa
+NewHeader head = {FIRMWARE_VER, 0,0, WATERIUS_2C, {0,0,0},{0,0,0}, 0, NORMAL_MODE, WAKEUP_PERIOD_DEFAULT};  //24 байт
 
-static ButtonB  button(2);	   // PB2 кнопка (на линии SCL)
-                               // Долгое нажатие: ESP включает точку доступа с веб сервером для настройки
-							   // Короткое: ESP передает показания
-static ESPPowerPin esp(1);  // Питание на ESP 
+// Структура для хранения в EEPROM
+struct WateriusStore{
+	Store Channel1;
+	Store Channel2;
+	uint8_t Resets;
+};
+WateriusStore WS EEMEM = {	{{0,0,0},{0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}},
+									{{0,0,0},{0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}},
+									0};					 
 
-// Данные
-struct Header info = {FIRMWARE_VER, 0, 0, 0, 0, WATERIUS_2C, 
-					   {CounterState_e::CLOSE, CounterState_e::CLOSE},
-				       {0, 0},
-					   {0, 0},
-					    0, 0
-					 };
+static Sensor sensorA(&head.chanel1,&WS.Channel1);
+#ifndef LOG_ON
+static Sensor sensorB(&head.chanel2,&WS.Channel2);
+#endif
+static ESPPowerPin esp;
 
-uint32_t wakeup_period;
-
-
-//Кольцевой буфер для хранения показаний на случай замены питания или перезагрузки
-//Кольцовой нужен для того, чтобы превысить лимит записи памяти в 100 000 раз
-//Записывается каждый импульс, поэтому для 10л/импульс срок службы памяти 10 000м3
-//100к * 20 = 2 млн * 10 л / 2 счетчика = 10 000 000 л или 10 000 м3
-static EEPROMStorage<Data> storage(20); // 8 byte * 20 + crc * 20
-
-SlaveI2C slaveI2C;
-
-volatile uint32_t wdt_count;
+/* 	Флаг сбрасывается стороживым таймером каждые 0,25 секунды.
+*/
+volatile uint8_t tick=0;
 
 /* Вектор прерываний сторожевого таймера watchdog */
 ISR(WDT_vect) { 
-	++wdt_count;
+	tick=0;
 }  
 
-// Проверяем входы на замыкание. 
-// Замыкание засчитывается только при повторной проверке.
-inline void counting() {
-
-    power_adc_enable(); //т.к. мы обесточили всё а нам нужен компаратор
-    adc_enable();       //после подачи питания на adc
-
-	if (counter0.is_impuls()) {
-		info.data.value0++;	  //нужен т.к. при пробуждении запрашиваем данные
-		info.adc.adc0 = counter0.adc;		
-		info.states.state0 = counter0.state;
-		storage.add(info.data);
-	}
-#ifndef LOG_ON
-	if (counter1.is_impuls()) {
-		info.data.value1++;
-		info.adc.adc1 = counter1.adc;
-		info.states.state1 = counter1.state;
-		storage.add(info.data);
-
-		//delayMicroseconds(65000);
-		//delayMicroseconds(65000);
-		//delayMicroseconds(65000);
-		//delayMicroseconds(65000);
-		//delayMicroseconds(65000);
-	}
-#endif
-
-	adc_disable();
-    power_adc_disable();
-
-}
-//Запрос периода при инициализции. Также период может изменится после настройки.
-// Настройка. Вызывается однократно при запуске.
-void setup() {
-
+// Главный цикл, повторящийся раз в сутки или при настройке вотериуса
+int main() {
 	noInterrupts();
-	info.service = MCUSR; // причина перезагрузки
+	head.service = MCUSR; // причина перезагрузки
 	MCUSR = 0;            // без этого не работает после перезагрузки по watchdog
 	wdt_disable();
     wdt_enable(WDTO_250MS);
+	WDTCR |= _BV(WDIE); 
 	interrupts(); 
+	ADCSRA=3;
 
 	set_sleep_mode( SLEEP_MODE_PWR_DOWN );
 
-	uint16_t size = storage.size();
-	if (storage.get(info.data)) { //не первая загрузка
-		info.resets = EEPROM.read(size);
-		info.resets++;
-		EEPROM.write(size, info.resets);
-	} else {
-		EEPROM.write(size, 0);
-	}
+	head.resets = eeprom_read_byte(&WS.Resets);
+	head.resets++;
+	eeprom_update_byte(&WS.Resets, head.resets);
 
-	wakeup_period = WAKEUP_PERIOD_DEFAULT;
+	// Inicialize
+	//adc
+	DDRB &= ~_BV(PB4);
+	DDRB &= ~_BV(PB3);
 
 	LOG_BEGIN(9600); 
 	LOG(F("==== START ===="));
-	LOG(F("MCUSR")); LOG(info.service);
-	LOG(F("RESET")); LOG(info.resets);
+	LOG(F("MCUSR")); LOG(head.service);
+	LOG(F("RESET")); LOG(head.resets);
 	LOG(F("EEPROM used:")); LOG(storage.size() + 1);
 	LOG(F("Data:"));
-	LOG(info.data.value0);
-	LOG(info.data.value1);
-}
+	LOG(head.chanel1.counter);
+	LOG(head.chanel2.counter);
 
-
-// Главный цикл, повторящийся раз в сутки или при настройке вотериуса
-void loop() {
-	power_all_disable();  // Отключаем все лишнее: ADC, Timer 0 and 1, serial interface
 	
-	wdt_count = 0;
-	while ((wdt_count < wakeup_period) && !button.pressed())
-	{		
-		counting(); 
-		WDTCR |= _BV(WDIE); 
+	while(1){
+		if (!tick){ // Если проснулись по сторожевому таймеру то обрабатывает счетчики
+			tick=1;
+			
+			WDTCR |= _BV(WDIE); 
+			power_adc_enable(); 
+    		adc_enable();       //после подачи питания на adc
+			PORTB|=_BV(PORTB4);
+			ADMUX = (1<<ADLAR) | 2;
+			sensorA.check();
+			PORTB&=~_BV(PORTB4);
+			#ifndef LOG_ON
+				PORTB|=_BV(PORTB3);	
+				ADMUX = (1<<ADLAR) | 3;
+				sensorB.check();
+				PORTB&=~_BV(PORTB3);
+			#endif
+			adc_disable();
+    		power_adc_disable();
+
+			// count minute
+			ESPPowerPin::tick();			
+		}		
+		#ifdef LOG_ON
+			mySerial.print(F("."));
+		#endif
 		sleep_mode();
 	}
-
-	power_all_enable();
-
-	LOG_BEGIN(9600);
-	LOG(F("Data:"));
-	LOG(info.data.value0);
-	LOG(info.data.value1);
-	
-	// Если пользователь нажал кнопку SETUP, ждем когда отпустит 
-	// иначе ESP запустится в режиме программирования (кнопка на i2c и 2 пине ESP)
-	// Если кнопка не нажата или нажата коротко - передаем показания 
-	unsigned long wake_up_limit;
-	if (button.wait_release() > LONG_PRESS_MSEC) { //wdt_reset внутри wait_release
-
-		LOG(F("SETUP pressed"));
-		slaveI2C.begin(SETUP_MODE);
-		wake_up_limit = SETUP_TIME_MSEC; //10 мин при настройке
-	} else {
-
-		LOG(F("wake up for transmitting"));
-		slaveI2C.begin(TRANSMIT_MODE);
-		wake_up_limit = WAIT_ESP_MSEC; //15 секунд при передаче данных
-	}
-
-	esp.power(true);
-	LOG(F("ESP turn on"));
-	
-	while (!slaveI2C.masterGoingToSleep() && !esp.elapsed(wake_up_limit)) {
-		
-		wdt_reset(); 
-		
-		info.voltage = readVcc();   // Текущее напряжение
-		counting();
-
-		delayMicroseconds(65000);
-
-		if (button.wait_release() > LONG_PRESS_MSEC) {  //wdt_reset внутри wait_release
-			break; // принудительно выключаем
-		}
-	}
-
-	slaveI2C.end();			// выключаем i2c slave.
-
-	if (!slaveI2C.masterGoingToSleep()) {
-		LOG(F("ESP wake up fail"));
-	} else {
-		LOG(F("Sleep received"));
-	}
-	
-	delayMicroseconds(20000);
-	
-	esp.power(false);
 }

@@ -38,8 +38,8 @@ struct SlaveData {
     uint8_t  state1;      //           вход 1
     uint32_t impulses0;   //Импульсов, канал 0
     uint32_t impulses1;   //           канал 1
-    uint16_t adc0;        //Уровень,   канал 0
-    uint16_t adc1;        //           канал 1
+    uint8_t adc0;        //Уровень,   канал 0
+    uint8_t adc1;        //           канал 1
     
     // HEADER_DATA_SIZE
 
