@@ -341,5 +341,6 @@ void setup_ap(Settings &sett, const SlaveData &data, const CalculatedData &cdata
     sett.setup_finished_counter++;
 
     sett.crc = FAKE_CRC; // todo: сделать нормальный crc16
+    LOG_INFO(F("Store config from setup_ap"));
     storeConfig(sett);
 }

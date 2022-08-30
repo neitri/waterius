@@ -2,6 +2,7 @@
 #include "Logging.h"
 #include <user_interface.h>
 #include <ESP8266WiFi.h>
+#include <PubSubClient.h>
 
 #include "wifi_settings.h"
 #include "master_i2c.h"
@@ -168,53 +169,90 @@ void loop()
                 LOG_INFO(F("RSSI: ") << cdata.rssi);
                 LOG_INFO(F("channel: ") << cdata.channel);
                 LOG_INFO(F("MAC: ") << String(cdata.router_mac, HEX));
-
-                if (send_blynk(sett, data, cdata)) {
-                    LOG_INFO(F("Send OK"));
+                uint8_t last_crc[2]= {0,0};
+                if (strnlen(sett.mqtt_host, MQTT_HOST_LEN) == 0) {
+                    LOG_INFO(F("MQTT: SKIP"));
+                    goto shutdown;
                 }
-                
-                if (send_mqtt(sett, data, cdata)) {
-                    LOG_INFO(F("Send OK"));
-                }
+                WiFiClient wclient;   
+                PubSubClient client(wclient);
+                client.setServer(sett.mqtt_host, sett.mqtt_port);
+                String clientId = "waterius-" + String(ESP.getChipId());
 
-                UserClass::sendNewData(sett, data, cdata);
-
-                //Сохраним текущие значения в памяти.
-                sett.impulses0_previous = data.impulses0;
-                sett.impulses1_previous = data.impulses1;
-
-                //Перешлем время на сервер при след. включении
-                sett.wake_time = millis();
-
-                //Перерасчет времени пробуждения
-                if (mode == TRANSMIT_MODE) {
-                    time_t now = time(nullptr);
-                    time_t t1 = (now - sett.last_send) / 60;
-                    if (t1 > 1 && data.version >= 24) {
-                        LOG_INFO(F("Minutes diff:") << t1);
-                        sett.set_wakeup = sett.wakeup_per_min * sett.set_wakeup / t1;
-                    } else {
-                        sett.set_wakeup = sett.wakeup_per_min;
+                const char *login = strnlen(sett.mqtt_login, MQTT_LOGIN_LEN) ? sett.mqtt_login : NULL;
+                const char *pass = strnlen(sett.mqtt_password, MQTT_PASSWORD_LEN) ? sett.mqtt_password : NULL;    
+                String topic(sett.mqtt_topic);
+                if (!topic.endsWith("/"))
+                    topic += '/';
+                unsigned long refresh_time=millis();
+                uint32_t lastdelta0=cdata.delta0;
+                uint32_t lastdelta1=cdata.delta1;
+                while(1){
+                    client.connect(clientId.c_str(), login, pass);
+                    while(client.connected()){ 
+                        masterI2C.getSlaveData(data);
+                        if (sett.factor1 > 0) cdata.channel0 = sett.channel0_start + (data.impulses0 - sett.impulses0_start) / 1000.0 * sett.factor0;
+                        if (sett.factor0 > 0) cdata.channel1 = sett.channel1_start + (data.impulses1 - sett.impulses1_start) / 1000.0 * sett.factor1;
+                        bool send_delta=(millis()>refresh_time);
+                        if (send_delta){
+                            refresh_time=millis()+60000;
+                            cdata.delta0  = (data.impulses0 - sett.impulses0_previous) * sett.factor0;
+                            cdata.delta1 = (data.impulses1 - sett.impulses1_previous) * sett.factor1;
+                            sett.impulses0_previous=data.impulses0;
+                            sett.impulses1_previous=data.impulses1;
+                            if (lastdelta0==cdata.delta0 && lastdelta1==cdata.delta1) send_delta=false;
+                            lastdelta0=cdata.delta0;
+                            lastdelta1=cdata.delta1;
+                        }
+                        //Вычисляем текущие показания
+                        if(last_crc[0]!=data.crc || last_crc[1]!=last_crc[0] || send_delta){
+                            client.publish((topic + "ch0").c_str(), String((float)cdata.channel0,3).c_str(), true);
+                            client.publish((topic + "ch1").c_str(), String((float)cdata.channel1,3).c_str(), true);
+                            if(send_delta){
+                                
+                                client.publish((topic + "delta0").c_str(), String(cdata.delta0).c_str(), true);
+                                client.publish((topic + "delta1").c_str(), String(cdata.delta1).c_str(), true);
+                            }
+                            client.publish((topic + "voltage").c_str(), String((float)(cdata.voltage / 1000.0), 3).c_str(), true);
+                            client.publish((topic + "resets").c_str(), String(data.resets).c_str(), true);
+                            client.publish((topic + "model").c_str(), String(data.model).c_str(), true);
+                            client.publish((topic + "boot").c_str(), String(data.service).c_str(), true);
+                            client.publish((topic + "good").c_str(), String(data.diagnostic).c_str(), true);
+                            client.publish((topic + "imp0").c_str(), String(data.impulses0).c_str(), true);
+                            client.publish((topic + "imp1").c_str(), String(data.impulses1).c_str(), true);
+                            client.publish((topic + "version").c_str(), String(data.version).c_str(), true);
+                            client.publish((topic + "version_esp").c_str(), String(FIRMWARE_VERSION).c_str(), true);
+                            client.publish((topic + "voltage_low").c_str(), String(cdata.low_voltage).c_str(), true);
+                            client.publish((topic + "voltage_diff").c_str(), String((float)(cdata.voltage_diff / 1000.0), 3).c_str(), true);
+                            client.publish((topic + "f1").c_str(), String(sett.factor1).c_str(), true);
+                            client.publish((topic + "f0").c_str(), String(sett.factor0).c_str(), true);
+                            client.publish((topic + "rssi").c_str(), String(cdata.rssi).c_str(), true);
+                            client.publish((topic + "waketime").c_str(), String(sett.wake_time).c_str(), true);
+                            client.publish((topic + "setuptime").c_str(), String(sett.setup_time).c_str(), true);
+                            client.publish((topic + "adc0").c_str(), String(data.adc0).c_str(), true);
+                            client.publish((topic + "adc1").c_str(), String(data.adc1).c_str(), true);
+                            client.publish((topic + "period_min").c_str(), String(sett.wakeup_per_min).c_str(), true);
+                            client.publish((topic + "serial0").c_str(), String(sett.serial0).c_str(), true);
+                            client.publish((topic + "serial1").c_str(), String(sett.serial1).c_str(), true);
+                            client.publish((topic + "mode").c_str(), String(sett.mode).c_str(), true);
+                            client.publish((topic + "setup_finished").c_str(), String(sett.setup_finished_counter).c_str(), true);
+                            client.publish((topic + "setup_started").c_str(), String(data.setup_started_counter).c_str(), true);
+                            client.publish((topic + "channel").c_str(), String(cdata.channel).c_str(), true);
+                            client.publish((topic + "mac").c_str(), String(cdata.router_mac).c_str(), true);
+                            last_crc[1]=last_crc[0];
+                            last_crc[0]=data.crc;
+                        }
+                        delay(1000);
+                        client.loop();
                     }
+                   client.disconnect();
+                    delay(10000);
                 }
-                sett.last_send = time(nullptr);
-
-                if (!masterI2C.setWakeUpPeriod(sett.set_wakeup)) {
-                    LOG_ERROR(F("Wakeup period wasn't set"));
-                } //"Разбуди меня через..."
-                else {
-                    LOG_INFO(F("Wakeup period, min:") << sett.wakeup_per_min);
-                    LOG_INFO(F("Wakeup period, tick:") << sett.set_wakeup);
-                }
-
                 storeConfig(sett);
             }
         } 
     }
-    LOG_INFO(F("Going to sleep"));
-    
-    masterI2C.sendCmd('Z');        // "Можешь идти спать, attiny"
     LOG_END();
-    
+shutdown:
     ESP.deepSleepInstant(0, RF_DEFAULT);  // Спим до следущего включения EN. Instant не ждет 92мс
 }

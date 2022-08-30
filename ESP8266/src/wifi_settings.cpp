@@ -93,7 +93,7 @@ bool loadConfig(struct Settings &sett)
 
     } else {    
         // Конфигурация не была сохранена в EEPROM, инициализируем с нуля
-        LOG_INFO(F("ESP config CRC failed. Maybe first run. Init configuration."));
+        LOG_INFO(F("ESP config CRC failed. Maybe first run. Init configuration. CRC=") << sett.crc);
         
         // Заполняем нулями всю конфигурацию
         memset(&sett, 0, sizeof(sett));

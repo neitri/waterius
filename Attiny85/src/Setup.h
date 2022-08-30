@@ -4,6 +4,7 @@
 #include <Arduino.h>
 
 #define WATERIUS_2C 0    // attiny85 - 2 счетчика импульсов
+#define WATERIUS_2C_MQTT 2    // attiny85 - 2 счетчика импульсов
 
 /* 
     Включение логирования
