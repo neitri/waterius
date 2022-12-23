@@ -13,6 +13,7 @@
 #include "voltage.h"
 #include "utils.h"
 #include "cert.h"
+#include "waterius.h"
 
 MasterI2C masterI2C; // Для общения с Attiny85 по i2c
 
@@ -74,6 +75,7 @@ void calculate_values(const Settings &sett, const SlaveData &data, CalculatedDat
     }
 }
 
+bool lastconnect=true;
 
 void loop()
 {
@@ -85,6 +87,10 @@ void loop()
         bool success = loadConfig(sett);
         if (!success) {
             LOG_ERROR(F("Error loading config"));
+            mode = SETUP_MODE;
+        }
+        if(WiFi.SSID().length()==0){
+            mode = SETUP_MODE;
         }
 
         sett.mode = mode;
@@ -159,8 +165,8 @@ void loop()
                 }
             }
             
-            if (success 
-                && WiFi.status() == WL_CONNECTED) {
+            lastconnect=(success && WiFi.status() == WL_CONNECTED);
+            if (lastconnect) {
                 
                 print_wifi_mode();
                 LOG_INFO(F("Connected, IP: ") << WiFi.localIP().toString());
@@ -252,7 +258,7 @@ void loop()
             }
         } 
     }
-    LOG_END();
-shutdown:
-    ESP.deepSleepInstant(0, RF_DEFAULT);  // Спим до следущего включения EN. Instant не ждет 92мс
+//    LOG_END();
+shutdown:;
+//    ESP.deepSleepInstant(0, RF_DEFAULT);  // Спим до следущего включения EN. Instant не ждет 92мс
 }

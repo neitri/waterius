@@ -6,8 +6,8 @@
 /*
 Номера пинов линии i2c.
 */
-#define SDA_PIN 0
-#define SCL_PIN 2
+#define SDA_PIN 13
+#define SCL_PIN 14
 
 //attiny85
 #define SETUP_MODE 1
