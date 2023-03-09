@@ -41,7 +41,7 @@ void setup()
 
 void loop()
 {
-    uint8_t mode = SETUP_MODE; // TRANSMIT_MODE;
+    uint8_t mode = (uint8_t)WateriusMode::SETUP; // TRANSMIT_MODE;
     bool config_loaded = false;
 
     // спрашиваем у Attiny85 повод пробуждения и данные
@@ -56,7 +56,7 @@ void loop()
         // Вычисляем текущие показания
         calculate_values(sett, data, cdata);
 
-        if (mode == SETUP_MODE)
+        if ((WateriusMode)mode == WateriusMode::SETUP)
         {
             LOG_INFO(F("Entering in setup mode..."));
             // Режим настройки - запускаем точку доступа на 192.168.4.1
@@ -171,7 +171,7 @@ void loop()
         blink_led(3,1000,500);
     }
     
-    masterI2C.sendCmd('Z'); // "Можешь идти спать, attiny"
+    masterI2C.sendCmd((uint8_t)WateriusCommand::GOTOSLEEP); // "Можешь идти спать, attiny"
 
     ESP.deepSleepInstant(0, RF_DEFAULT); // Спим до следущего включения EN. Instant не ждет 92мс
 

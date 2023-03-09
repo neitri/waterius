@@ -130,8 +130,6 @@
 
 #define SERVER_TIMEOUT 12000UL // Время ответа сервера, ms
 
-#define I2C_SLAVE_ADDR 10 // i2c адрес Attiny85
-
 #define VER_8 8
 #define CURRENT_VERSION VER_8
 

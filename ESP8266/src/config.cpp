@@ -263,7 +263,7 @@ void update_config(Settings &sett, const SlaveData &data, const CalculatedData &
     time_t now = time(nullptr);
 
     // Перерасчет времени пробуждения
-    if (sett.mode == TRANSMIT_MODE)
+    if ((WateriusMode)sett.mode == WateriusMode::TRANSMIT)
     {
         // нужно удстовериться что время было устанаовлено в прошлом и сейчас
         //  т.е. перерасчет можно делать только если оба установлены или оба не установлены

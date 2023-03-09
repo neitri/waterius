@@ -3,38 +3,8 @@
 #include <Wire.h>
 #include <Arduino.h>
 #include "setup.h"
+#include <Waterius.h>
 
-// https://github.com/lammertb/libcrc/blob/600316a01924fd5bb9d47d535db5b8f3987db178/src/crc8.c
-
-// https://gist.github.com/brimston3/83cdeda8f7d2cf55717b83f0d32f9b5e
-// https://www.onlinegdb.com/online_c++_compiler
-// Dallas CRC x8+x5+x4+1
-uint8_t crc_8(unsigned char *b, size_t num_bytes, uint8_t crc)
-{
-    uint8_t i;
-    for (size_t a = 0; a < num_bytes; a++)
-    {
-        i = (*(b + a) ^ crc) & 0xff;
-        crc = 0;
-        if (i & 1)
-            crc ^= 0x5e;
-        if (i & 2)
-            crc ^= 0xbc;
-        if (i & 4)
-            crc ^= 0x61;
-        if (i & 8)
-            crc ^= 0xc2;
-        if (i & 0x10)
-            crc ^= 0x9d;
-        if (i & 0x20)
-            crc ^= 0x23;
-        if (i & 0x40)
-            crc ^= 0x46;
-        if (i & 0x80)
-            crc ^= 0x8c;
-    }
-    return crc;
-}
 
 void MasterI2C::begin()
 {
@@ -51,7 +21,7 @@ bool MasterI2C::sendCmd(uint8_t cmd)
 bool MasterI2C::sendData(uint8_t *buf, size_t size)
 {
     uint8_t i;
-    Wire.beginTransmission(I2C_SLAVE_ADDR);
+    Wire.beginTransmission(I2C_SLAVE_ADDRESS);
     for (i = 0; i < size; i++)
     {
         if (Wire.write(buf[i]) != 1)
@@ -73,7 +43,7 @@ bool MasterI2C::sendData(uint8_t *buf, size_t size)
 bool MasterI2C::getByte(uint8_t &value, uint8_t &crc)
 {
 
-    if (Wire.requestFrom(I2C_SLAVE_ADDR, 1) != 1)
+    if (Wire.requestFrom(I2C_SLAVE_ADDRESS, 1) != 1)
     {
         LOG_ERROR(F("RequestFrom failed"));
         return false;
@@ -93,8 +63,7 @@ bool MasterI2C::getByte(uint8_t &value, uint8_t &crc)
  */
 bool MasterI2C::getByte(uint8_t *value, uint8_t &crc)
 {
-
-    if (Wire.requestFrom(I2C_SLAVE_ADDR, 1) != 1)
+    if (Wire.requestFrom(I2C_SLAVE_ADDRESS, 1) != 1)
     {
         LOG_ERROR(F("RequestFrom failed"));
         return false;
@@ -161,7 +130,7 @@ bool MasterI2C::getMode(uint8_t &mode)
 {
 
     uint8_t crc; // not used
-    if (!sendCmd('M') || !getByte(mode, crc))
+    if (!sendCmd((uint8_t)WateriusCommand::GETMODE) || !getByte(&mode, crc))
     {
         LOG_ERROR(F("GetMode failed. Check i2c line."));
         return false;
@@ -183,11 +152,12 @@ bool MasterI2C::getMode(uint8_t &mode)
  */
 bool MasterI2C::getSlaveData(SlaveData &data)
 {
-    sendCmd('B');
+    sendCmd((uint8_t)WateriusCommand::GETDATA);
+    delay(1); // не успевает подсчитать crc
     data.diagnostic = WATERIUS_NO_LINK;
     Header buffer;
     uint8_t crc = 0;
-    if (!getBytes((uint8_t *)&buffer, 23, crc))
+    if (!getBytes((uint8_t *)&buffer, sizeof(Header), crc))
     {
         LOG_ERROR(F("Data failed"));
         return false;
@@ -197,13 +167,13 @@ bool MasterI2C::getSlaveData(SlaveData &data)
     data.setup_started_counter = buffer.setup_started_counter;
     data.resets = buffer.resets;
     data.model = buffer.model;
-    data.state0 = buffer.state0;
-    data.state1 = buffer.state1;
+    data.state0 = buffer.states.state0;
+    data.state1 = buffer.states.state1;
 
-    data.impulses0 = buffer.value0;
-    data.impulses1 = buffer.value1;
-    data.adc0 = buffer.adc0;
-    data.adc1 = buffer.adc1;
+    data.impulses0 = buffer.data.value0;
+    data.impulses1 = buffer.data.value1;
+    data.adc0 = buffer.adc.adc0;
+    data.adc1 = buffer.adc.adc1;
     data.crc = buffer.crc;
     
     LOG_INFO(F("version: ") << data.version);
@@ -233,7 +203,7 @@ bool MasterI2C::setWakeUpPeriod(uint16_t period)
 {
     uint8_t txBuf[4];
 
-    txBuf[0] = 'S';
+    txBuf[0] = (uint8_t)WateriusCommand::SETWAKEUP;
     txBuf[1] = (uint8_t)(period >> 8);
     txBuf[2] = (uint8_t)(period);
     txBuf[3] = crc_8(&txBuf[1], 2, 0);

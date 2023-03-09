@@ -4,14 +4,15 @@
 #include <Arduino.h>
 #include "Storage.h"
 #include <Wire.h>
+#include <Waterius.h>
 
 extern struct Header info;
 extern uint32_t wakeup_period;
 
 /* Static declaration */
 uint8_t SlaveI2C::txBufferPos = 0;
-uint8_t SlaveI2C::txBuffer[TX_BUFFER_SIZE];
-uint8_t SlaveI2C::setup_mode = TRANSMIT_MODE;
+uint8_t SlaveI2C::txBuffer[sizeof(Header)];
+uint8_t SlaveI2C::setup_mode = (uint8_t)WateriusMode::TRANSMIT;
 bool SlaveI2C::masterSentSleep = false;
 unsigned long SlaveI2C::SentSleep_timestamp; 
 
@@ -34,13 +35,13 @@ void SlaveI2C::end()
 void SlaveI2C::requestEvent()
 {
     Wire.write(txBuffer[txBufferPos]);
-    if (txBufferPos + 1 < TX_BUFFER_SIZE)
+    if (txBufferPos < sizeof(txBuffer)-1)
         txBufferPos++; // Avoid buffer overrun if master misbehaves
 }
 
 void SlaveI2C::newCommand()
 {
-    memset(txBuffer, 0xAA, TX_BUFFER_SIZE); // Zero the tx buffer (with 0xAA so master has a chance to see he is stupid)
+    memset(txBuffer, 0xAA, sizeof(txBuffer)); // Zero the tx buffer (with 0xAA so master has a chance to see he is stupid)
     txBufferPos = 0;                        // The next read from master starts from begining of buffer
 }
 
@@ -53,24 +54,24 @@ void SlaveI2C::receiveEvent(int howMany)
     command = Wire.read(); // Get instructions from master
 
     newCommand();
-    switch (command)
+    switch ((WateriusCommand)command)
     {
-    case 'B': // данные
-        info.crc = crc_8((unsigned char *)&info, HEADER_DATA_SIZE);
-        memcpy(txBuffer, &info, TX_BUFFER_SIZE);
+    case WateriusCommand::GETDATA: // данные
+        info.crc = crc_8((unsigned char *)&info, sizeof(info)-1);
+        memcpy(txBuffer, &info, sizeof(info));
         break;
-    case 'Z': // Готовы ко сну
+    case WateriusCommand::GOTOSLEEP: // Готовы ко сну
         SentSleep_timestamp = millis();
         masterSentSleep = true;
         break;
-    case 'M': // Разбудили ESP для настройки или передачи данных?
+    case WateriusCommand::GETMODE: // Разбудили ESP для настройки или передачи данных?
         txBuffer[0] = setup_mode;
         break;
-    case 'T': // После настройки ESP сменит режим пробуждения и сразу скинет данные
+    case WateriusCommand::TRANSMIT: // После настройки ESP сменит режим пробуждения и сразу скинет данные
               // MANUAL потому что при TRANSMIT_MODE ESP корректирует время
-        setup_mode = MANUAL_TRANSMIT_MODE;
+        setup_mode = (uint8_t)WateriusMode::MANUAL_TRANSMIT;
         break;
-    case 'S': // ESP присылает новое значение периода пробуждения
+    case WateriusCommand::SETWAKEUP: // ESP присылает новое значение периода пробуждения
         getWakeUpPeriod();
         break;
     }

@@ -33,6 +33,7 @@
 #include "ha/publish_discovery.h"
 #include "ha/subscribe.h"
 #include "utils.h"
+#include <Waterius.h>
 
 WiFiClient wifi_client;
 PubSubClient mqtt_client(wifi_client);
@@ -100,8 +101,8 @@ bool send_mqtt(Settings &sett, const SlaveData &data, const CalculatedData &cdat
     mqtt_client.loop();
     // autodiscovery после настройки и по нажатию на кнопку
     if (sett.mqtt_auto_discovery && (ALWAYS_MQTT_AUTO_DISCOVERY ||
-                                     (sett.mode == SETUP_MODE) ||
-                                     (sett.mode == MANUAL_TRANSMIT_MODE)))
+                                     ((WateriusMode)sett.mode == WateriusMode::SETUP) ||
+                                     ((WateriusMode)sett.mode == WateriusMode::MANUAL_TRANSMIT)))
     {
         String mqtt_discovery_topic = sett.mqtt_discovery_topic;
         remove_trailing_slash(mqtt_discovery_topic);

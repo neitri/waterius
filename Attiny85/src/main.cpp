@@ -10,6 +10,7 @@
 #include <avr/wdt.h>
 #include <avr/sleep.h>
 #include <avr/power.h>
+#include <Waterius.h>
 
 // Для логирования раскомментируйте LOG_ON в Setup.h
 #if defined(LOG_ON)
@@ -117,7 +118,7 @@ static ButtonB button(2);  // PB2 кнопка (на линии SCL)
 static ESPPowerPin esp(1); // Питание на ESP
 
 // Данные
-struct Header info = {FIRMWARE_VER, 0, 0, 0, 0, 0, WATERIUS_2C, {CounterState_e::CLOSE, CounterState_e::CLOSE}, {0, 0}, {0, 0}, 0, 0};
+struct Header info = {FIRMWARE_VER, 0, 0, 0, 0, 0, WATERIUS_CLASSIC, {CounterState_e::CLOSE, CounterState_e::CLOSE}, {0, 0}, {0, 0}, 0};
 
 uint32_t wakeup_period;
 
@@ -240,7 +241,7 @@ void loop()
 	if (button.wait_release() > LONG_PRESS_MSEC)
 	{ // wdt_reset внутри wait_release
 		LOG(F("SETUP pressed"));
-		slaveI2C.begin(SETUP_MODE);
+		slaveI2C.begin((uint8_t)WateriusMode::SETUP);
 		wake_up_limit = SETUP_TIME_MSEC; // 10 мин при настройке
 
 		uint16_t setup_started_addr = storage.size() + 1;
@@ -254,12 +255,12 @@ void loop()
 		if (wdt_count < wakeup_period)
 		{
 			LOG(F("Manual transmit wake up"));
-			slaveI2C.begin(MANUAL_TRANSMIT_MODE);
+			slaveI2C.begin((uint8_t)WateriusMode::MANUAL_TRANSMIT);
 		}
 		else
 		{
 			LOG(F("wake up for transmitting"));
-			slaveI2C.begin(TRANSMIT_MODE);
+			slaveI2C.begin((uint8_t)WateriusMode::TRANSMIT);
 		}
 		wake_up_limit = WAIT_ESP_MSEC; // 15 секунд при передаче данных
 	}

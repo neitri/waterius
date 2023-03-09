@@ -19,14 +19,6 @@
 #define TRIES 3 //Сколько раз после окончания импульса
                 //должно его не быть, чтобы мы зарегистририровали импульс
 
-enum CounterState_e
-{
-    CLOSE,
-    NAMUR_CLOSE,
-    NAMUR_OPEN,
-    OPEN
-};
-
 struct CounterB
 {
     int8_t _checks; // -1 <= _checks <= TRIES

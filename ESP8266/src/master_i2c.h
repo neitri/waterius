@@ -2,21 +2,13 @@
 #define _MASTERI2C_h
 
 #include <Arduino.h>
+#include <Waterius.h>
 
 /*
 Номера пинов линии i2c.
 */
 #define SDA_PIN 0
 #define SCL_PIN 2
-
-// attiny85
-#define SETUP_MODE 1
-#define TRANSMIT_MODE 2
-#define MANUAL_TRANSMIT_MODE 3
-
-// model
-#define WATERIUS_CLASSIC 0
-#define WATERIUS_4C2W 1
 
 enum Status_t
 {
@@ -54,34 +46,6 @@ struct SlaveData
     uint8_t reserved3 = 0;
     // Кратно 16bit https://github.com/esp8266/Arduino/issues/1825
 };
-
-#pragma pack(push, 1)
-struct Header
-{
-    uint8_t version;
-    uint8_t service;
-    uint8_t reserved2;
-    uint8_t reserved3;
-
-    uint8_t reserved4;
-    uint8_t setup_started_counter;
-    uint8_t resets;
-    uint8_t model;
-
-    uint8_t state0;
-    uint8_t state1;
-    uint32_t value0;
-    uint32_t value1;
-    uint16_t adc0;
-    
-    uint16_t adc1;
-
-    uint8_t crc;
-    uint8_t reserved23;
-}; // 24 байт
-#pragma pack(pop)
-
-uint8_t crc_8(const unsigned char *input_str, size_t num_bytes, uint8_t crc = 0);
 
 class MasterI2C
 {

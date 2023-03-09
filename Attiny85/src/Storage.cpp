@@ -1,34 +1,5 @@
 #include "Storage.h"
-
-// https://gist.github.com/brimston3/83cdeda8f7d2cf55717b83f0d32f9b5e
-// https://www.onlinegdb.com/online_c++_compiler
-// Dallas CRC x8+x5+x4+1
-uint8_t crc_8(unsigned char *b, size_t num_bytes)
-{
-    uint8_t i, crc = 0;
-    for (size_t a = 0; a < num_bytes; a++)
-    {
-        i = (*(b + a) ^ crc) & 0xff;
-        crc = 0;
-        if (i & 1)
-            crc ^= 0x5e;
-        if (i & 2)
-            crc ^= 0xbc;
-        if (i & 4)
-            crc ^= 0x61;
-        if (i & 8)
-            crc ^= 0xc2;
-        if (i & 0x10)
-            crc ^= 0x9d;
-        if (i & 0x20)
-            crc ^= 0x23;
-        if (i & 0x40)
-            crc ^= 0x46;
-        if (i & 0x80)
-            crc ^= 0x8c;
-    }
-    return crc;
-}
+#include <Waterius.h>
 
 template <class T>
 EEPROMStorage<T>::EEPROMStorage(const uint8_t _blocks, const uint8_t _start_addr)
